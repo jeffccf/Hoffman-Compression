@@ -1,171 +1,170 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <stdbool.h>
 #include <string.h>
-#define LEN 50
 #define SIZE 257
+#define STRSIZE 50
 
-    struct characters
+struct characters
 {
-   int c;
-   char str[LEN];
-   struct characters * right;
-   struct characters * left;
+    int left; // The left children of the node
+    int right; // The right children of the node
+    int c1; // The Ascii code of the character, the 256th character represents the final character of the file
+    int freq; // The frequency of the character
+    char str[STRSIZE]; // The new codeword of the character
+    int code; // This code assists the program to build the tree
 };
 
-struct characters * build_trie(struct characters * node,struct characters * cur, int index, int str_len);
-void dfs(struct characters * root);
-struct characters * new_node();
-char * char_to_bin(char c);
+void depth_first_search(struct characters *node, FILE *fo,struct characters *codes);
 
-// Input of the program are the generated codebook and the compressed text
-// Recovers the original text
+// Input of the program is the original text
+// Generates a codebook of the original text
 int main(int argc, char *argv[])
 {
-    struct characters chars[SIZE];
-    FILE *fp1,*fp2,*fo;
-    int i;
-    fp1=fopen(argv[1],"rb"); // The compressed text
-    fp2=fopen(argv[2],"rb"); // The codebook
-    fo=fopen(argv[3],"wb"); // The output file
-    char last = '\n';
-    int c;
-    char cur[LEN],buffer[9];
-    int curchar = 0;
-    bool check = false;
-    
+    struct characters *chars,tmp;
+    int i, j, appeared_char = 0, c;
+    FILE *fp, *fo;
 
-    for(i=0;i<SIZE;i++){
-        chars[i].c=i;
-        strcpy(chars[i].str,"");
-        chars[i].right = NULL;
-        chars[i].left = NULL;
+    fp=fopen(argv[1],"rb");
+    fo=fopen(argv[2],"wb");
+
+    chars = (struct characters*)malloc(sizeof(struct characters)*SIZE);
+    if (chars == NULL) {
+        fprintf(stderr, "Memory allocation failed\n");
+        return 1; // Exit the program with an error code
     }
-    strcpy(cur,"");
-    i = 0;
-    while(c!=EOF){
-        c = fgetc(fp2);
-        if (check){
-            if (c == '\r'){
-                cur[i] = '\0';
-                if(curchar>=0 && curchar<=9)
-                    curchar += '0';
-                strcpy(chars[curchar].str,cur);
-                strcpy(cur,"");
-                last = '\n';
-                check = false;
-                i = 0;
-                curchar = 0;
-                c = fgetc(fp2);
-            } else{
-                cur[i++] = c;
-            }
-        } else if (c == ' '){
-            if(last == '\n'){
-                curchar = ' ';
-            } else {
-                check = true;
-            }
-        } else if (last == 92){
-            if(c=='n')
-                curchar = '\n';
-            else if(c=='r')
-                curchar = '\r';
-        } else if (c>='0' && c<='9'){
-            curchar = curchar*10+c-'0';
-        } else {
-            curchar = c;
-        }
-        last = c;
+
+    // Initialize the characters attibutes
+    for(i=0;i<SIZE;i++)
+    {
+        chars[i].freq=0;
+        chars[i].c1=i;
+        chars[i].left = -1;
+        chars[i].right = -1;
     }
-    struct characters * root;
-    root = new_node();
-    for(i=0;i<SIZE;i++){
-        if(strlen(chars[i].str)>0){
-            root = build_trie(root,chars+i,0,strlen(chars[i].str));
-        }
-    }
-    struct characters * node;
-    node = root;
+
+    chars[256].freq = 1; // This character indicates the end of the file, which only appears once
+
+    // Count the frequency of characters
     do{
-        c = fgetc(fp1);
-        strcpy(buffer,char_to_bin(c));
-        for(int i=0;i<8;i++){
-            if(buffer[i] == '1'){
-                node = node->left;
-            } else {
-                node = node->right;
-            }
-            if(node->c!=257){
-                if(node->c == 256){
-                    fclose(fp1);
-                    fclose(fp2);
-                    fclose(fo);
-                    return 0;
-                }
-                fprintf(fo,"%c",node->c);
-                node = root;
+        c=fgetc(fp);
+        chars[c].freq++;
+    }while(c!=EOF);
+
+    // Sort the characters by their frequencies, from large to small
+    for(i=1;i<SIZE;i++)
+    {
+        for(j=0;j<i;j++)
+        {
+            if(chars[i].freq>chars[j].freq)
+            {
+                tmp=chars[i];
+                chars[i]=chars[j];
+                chars[j]=tmp;
             }
         }
-    } while (c!=EOF);
-    fclose(fp1);
-    fclose(fp2);
+    }
+
+    // Count the numbers of characters that appears in the text
+    for(i=0;i<SIZE;i++)
+        if(chars[i].freq) appeared_char++;
+
+    // Initialize the tree nodes
+    struct characters * tree_node;
+    tree_node = (struct characters*)malloc(sizeof(struct characters)*(2*appeared_char-1));
+
+    if (tree_node == NULL) {
+        fprintf(stderr, "Memory allocation failed\n");
+        return 1; // Exit the program with an error code
+    }
+    
+    // This array stores the codes of the tree node so that when we shuffle the tree nodes in its array, we won't loss the code
+    struct characters * codes;
+    codes = (struct characters*)malloc(sizeof(struct characters)*(2*appeared_char-1));
+
+    if (codes == NULL) {
+        fprintf(stderr, "Memory allocation failed\n");
+        return 1; // Exit the program with an error code
+    }
+
+    // Build the tree structure
+    for(i=0;i<2*appeared_char-1;i++){
+        if (i<appeared_char)
+            tree_node[i] = chars[i]; // These are the leaf nodes, which are actual characters
+        strcpy(tree_node[i].str,"");
+        tree_node[i].code = i; // Give every tree node a code to identify them
+        codes[i] = tree_node[i]; 
+        tree_node[i].left = tree_node[i].right = -1;
+    }
+
+    free(chars);
+
+    for(i=appeared_char-1;i>=1;i--){
+        int index = 2*appeared_char-1-i; // The parent node of the two nodes to be merged
+        tree_node[index].freq = tree_node[i].freq + tree_node[i-1].freq; // Its frequency is the addition of frquencies of its children
+        codes[tree_node[index].code].left = tree_node[i-1].code; 
+        codes[tree_node[index].code].right = tree_node[i].code; // Store the parent's left and right children
+        // Swap the parent node with its left children in the array
+        struct characters temp;
+        temp = tree_node[index];
+        tree_node[index] = tree_node[i-1];
+        tree_node[i-1] = temp;
+        j = i-2;
+        // Sort the array from index 0 to i, since 0 to i-1 is sorted, just find the right spot for the new node
+        while(j>=0 && tree_node[j].freq<tree_node[j+1].freq){
+            temp = tree_node[j];
+            tree_node[j] = tree_node[j+1];
+            tree_node[j+1] = temp;
+            j--;
+        }
+    }
+
+    depth_first_search(&codes[tree_node[0].code],fo,codes);
+
+    // Count the compression rate
+    int total = 0, len = 0;
+    for(i=0;i<appeared_char;i++){
+        total += codes[i].freq;
+        len += strlen(codes[i].str)*codes[i].freq;
+    }
+
+    printf("Average bit for a character is %f\n",(float)len/total);
+    printf("Compression rate is %f\n",(float)len/total/8);
+
+    free(codes);
+    free(tree_node);
+
+    fclose(fp);
     fclose(fo);
+
     return 0;
 }
 
-struct characters * build_trie(struct characters * node, struct characters * cur, int index, int str_len){
+// Use depth first search to find out the codeword of the characters
+void depth_first_search(struct characters *node, FILE *fo,struct characters *codes){
 
-    if(index == str_len){
-        return cur;
+    // If this node is a leaf node, print its character and its codeword to the output file
+    if(node->left==-1){
+
+        if(node->c1 == 10){
+            fprintf(fo,"\\n ");
+        } else if (node->c1 == 13){
+            fprintf(fo,"\\r ");
+        } else if (node->c1 <= 127){
+            fprintf(fo,"%c ",node->c1);
+        } else {
+            fprintf(fo,"%d ",node->c1);
+        }
+        fprintf(fo,"%s\r\n",node->str);
+        return;
+
     }
+    char tmp[STRSIZE];
+    strcpy(tmp,node->str);
+    strcpy(codes[node->left].str,strcat(tmp,"1"));
+    strcpy(tmp,node->str);
+    strcpy(codes[node->right].str,strcat(tmp,"0"));
+    depth_first_search(&codes[node->left],fo,codes);
+    depth_first_search(&codes[node->right],fo,codes);
 
-    if(!node){
-        node = new_node();
-    }
-
-    if(cur->str[index]=='0'){ //go to right
-        node->right = build_trie(node->right,cur,index+1,str_len);
-    } else { //go to left
-        node->left = build_trie(node->left,cur,index+1,str_len);
-    }
-
-    return node;
-}
-
-struct characters * new_node(){
-    struct characters * newnode = (struct characters *)malloc(sizeof(struct characters));
-    newnode->c = 257;
-    newnode->left = NULL;
-    newnode->right = NULL;
-    strcpy(newnode->str,"");
-    return newnode;
-}
-
-void dfs(struct characters * root){
-    if(!root) return ;
-
-    if((!root->right && root->left) || (root->right && !root->left)) {
-        if(!root->left) printf("left\n");
-        else printf("right\n");
-        printf("Wrong! %d %s\n",root->c,root->str); 
-    }
- 
-    if(!root->right && !root->left){
-        printf("%d %s\n",root->c,root->str);
-        return ;
-    }
-    dfs(root->left);
-    dfs(root->right);
     return;
-}
-
-char * char_to_bin(char c){
-    char * tmp = (char*)malloc(9 * sizeof(char));
-    for(int i=7;i>=0;i--){
-        tmp[i] = (c&1)+'0';
-        c >>= 1;
-    }
-    tmp[8] = '\0';
-    return tmp;
 }
