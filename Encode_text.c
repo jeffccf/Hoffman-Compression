@@ -7,10 +7,10 @@
 
 int ascii_converter(char * str);
 
-    struct characters
+struct characters
 {
-   int c;
-   char str[LEN];
+   int c; // The ascii code of the character
+   char str[LEN]; // The codeword of the character
 };
 
 // Input of the program are the generated codebook and the original text
@@ -38,6 +38,7 @@ int main(int argc, char *argv[])
     strcpy(cur,"");
     i = 0;
     
+    // Store the codewords from the codebook file
     while(c!=EOF){
         c = fgetc(fp2);
         if (check){
@@ -73,23 +74,22 @@ int main(int argc, char *argv[])
         }
         last = c;
     }
-    int cnt = 0;
+
+    // Read the original text and compress it using the codewords
     do{
         c = fgetc(fp1);
         strcat(buffer,chars[c].str);
         while(strlen(buffer)>=8){
             fprintf(fo,"%c",ascii_converter(buffer));
-            cnt++;
             strcpy(buffer,buffer+8);
         }
     }while(c!=EOF);
     
-    strcat(buffer,chars[256].str);
+    strcat(buffer,chars[256].str); // This character indicates the end of the file
 
     while(strlen(buffer)>=8){
         fprintf(fo,"%c",ascii_converter(buffer));
         strcpy(buffer,buffer+8);
-        cnt++;
     }
 
     c = 0;
@@ -98,7 +98,6 @@ int main(int argc, char *argv[])
             c = c*2;
             if(buffer[i]=='1') c+=1;
         }
-        cnt++;
     }
     fprintf(fo,"%c",c);
 
@@ -109,6 +108,7 @@ int main(int argc, char *argv[])
     return 0;
 }
 
+// This converter converts a byte of 0s and 1s into the character it presents in the ascii table
 int ascii_converter(char * str){
     if(strlen(str)<8) return ' ';
     int res = 0;
