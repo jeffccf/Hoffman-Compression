@@ -1,156 +1,166 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <string.h>
+#define LEN 50
 #define SIZE 257
-#define STRSIZE 50
 
 struct characters
 {
-    int left;
-    int right;
-    int c1;
-    int freq;
-    char str[STRSIZE];
-    int code;
+   int c; // The ascii code of the character
+   char str[LEN]; // The codeword of the character
+   struct characters * right; // The right childen of the node
+   struct characters * left; // The left children of the node
 };
 
-void depth_first_search(struct characters *node, FILE *fo,struct characters *codes);
+struct characters * build_trie(struct characters * node,struct characters * cur, int index, int str_len);
+void dfs(struct characters * root);
+struct characters * new_node();
+char * char_to_bin(char c);
 
+// Input of the program are the generated codebook and the compressed text
+// Recovers the original text
 int main(int argc, char *argv[])
 {
-    struct characters *chars,tmp;
-    int i, j, appeared_char = 0, c;
-    FILE *fp, *fo;
+    struct characters chars[SIZE];
+    FILE *fp1,*fp2,*fo;
+    int i;
+    fp1=fopen(argv[1],"rb"); // The compressed text
+    fp2=fopen(argv[2],"rb"); // The codebook
+    fo=fopen(argv[3],"wb"); // The output file
+    char last = '\n';
+    int c;
+    char cur[LEN],buffer[9];
+    int curchar = 0;
+    bool check = false;
+    
+    // Initialize the nodes
+    for(i=0;i<SIZE;i++){
+        chars[i].c=i;
+        strcpy(chars[i].str,"");
+        chars[i].right = NULL;
+        chars[i].left = NULL;
+    }
+    strcpy(cur,"");
+    i = 0;
 
-    fp=fopen(argv[1],"rb");
-    fo=fopen(argv[2],"wb");
-
-    chars = (struct characters*)malloc(sizeof(struct characters)*SIZE);
-    if (chars == NULL) {
-        fprintf(stderr, "Memory allocation failed\n");
-        return 1; // Exit the program with an error code
+    // Store the codewords from the codebook file
+    while(c!=EOF){
+        c = fgetc(fp2);
+        if (check){
+            if (c == '\r'){
+                cur[i] = '\0';
+                if(curchar>=0 && curchar<=9)
+                    curchar += '0';
+                strcpy(chars[curchar].str,cur);
+                strcpy(cur,"");
+                last = '\n';
+                check = false;
+                i = 0;
+                curchar = 0;
+                c = fgetc(fp2);
+            } else{
+                cur[i++] = c;
+            }
+        } else if (c == ' '){
+            if(last == '\n'){
+                curchar = ' ';
+            } else {
+                check = true;
+            }
+        } else if (last == 92){
+            if(c=='n')
+                curchar = '\n';
+            else if(c=='r')
+                curchar = '\r';
+        } else if (c>='0' && c<='9'){
+            curchar = curchar*10+c-'0';
+        } else {
+            curchar = c;
+        }
+        last = c;
     }
 
-    for(i=0;i<SIZE;i++)
-    {
-        chars[i].freq=0;
-        chars[i].c1=i;
-        chars[i].left = -1;
-        chars[i].right = -1;
+    struct characters * root; // The root of the trie
+    root = new_node();
+
+    // Build the trie
+    for(i=0;i<SIZE;i++){
+        if(strlen(chars[i].str)>0){
+            root = build_trie(root,chars+i,0,strlen(chars[i].str));
+        }
     }
 
-    chars[256].freq = 1;
+    struct characters * node;
+    node = root;
 
+    // Decompress the compressed data
     do{
-        c=fgetc(fp);
-        chars[c].freq++;// count the frequency of characters
-    }while(c!=EOF);
-
-    for(i=1;i<SIZE;i++)// sort the frequency of characters
-    {
-        for(j=0;j<i;j++)
-        {
-            if(chars[i].freq>chars[j].freq)
-            {
-                tmp=chars[i];
-                chars[i]=chars[j];
-                chars[j]=tmp;
+        c = fgetc(fp1);
+        strcpy(buffer,char_to_bin(c));
+        for(int i=0;i<8;i++){
+            if(buffer[i] == '1'){
+                node = node->left;
+            } else {
+                node = node->right;
+            }
+            if(node->c!=257){
+                if(node->c == 256){ // If the character indicates the end of the file, terminate the program
+                    fclose(fp1);
+                    fclose(fp2);
+                    fclose(fo);
+                    return 0;
+                }
+                fprintf(fo,"%c",node->c);
+                node = root;
             }
         }
-    }
+    } while (c!=EOF);
 
-    for(i=0;i<SIZE;i++)
-        if(chars[i].freq) appeared_char++;
-
-    struct characters * tree_node;
-    tree_node = (struct characters*)malloc(sizeof(struct characters)*(2*appeared_char-1));
-
-    if (tree_node == NULL) {
-        fprintf(stderr, "Memory allocation failed\n");
-        return 1; // Exit the program with an error code
-    }
-    
-    struct characters * codes;
-    codes = (struct characters*)malloc(sizeof(struct characters)*(2*appeared_char-1));
-
-    if (codes == NULL) {
-        fprintf(stderr, "Memory allocation failed\n");
-        return 1; // Exit the program with an error code
-    }
-
-    for(i=0;i<2*appeared_char-1;i++){
-        if (i<appeared_char)
-            tree_node[i] = chars[i];
-        strcpy(tree_node[i].str,"");
-        tree_node[i].code = i;
-        codes[i] = tree_node[i];
-        tree_node[i].left = tree_node[i].right = -1;
-    }
-
-    free(chars);
-
-    for(i=appeared_char-1;i>=1;i--){
-        int index = 2*appeared_char-1-i;
-        tree_node[index].freq = tree_node[i].freq + tree_node[i-1].freq;
-        codes[tree_node[index].code].left = tree_node[i-1].code;
-        codes[tree_node[index].code].right = tree_node[i].code;
-        struct characters temp;
-        temp = tree_node[index];
-        tree_node[index] = tree_node[i-1];
-        tree_node[i-1] = temp;
-        j = i-2;
-        while(j>=0 && tree_node[j].freq<tree_node[j+1].freq){
-            temp = tree_node[j];
-            tree_node[j] = tree_node[j+1];
-            tree_node[j+1] = temp;
-            j--;
-        }
-    }
-
-    depth_first_search(&codes[tree_node[0].code],fo,codes);
-
-    int total = 0, len = 0;
-    for(i=0;i<appeared_char;i++){
-        total += codes[i].freq;
-        len += strlen(codes[i].str)*codes[i].freq;
-    }
-
-    printf("Average bit for a character is %f\n",(float)len/total);
-    printf("Compression rate is %f\n",(float)len/total/8);
-
-    free(codes);
-    free(tree_node);
-
-    fclose(fp);
+    fclose(fp1);
+    fclose(fp2);
     fclose(fo);
 
     return 0;
 }
 
-void depth_first_search(struct characters *node, FILE *fo,struct characters *codes){
+// Build the trie base on the codebook
+struct characters * build_trie(struct characters * node, struct characters * cur, int index, int str_len){
 
-    if(node->left==-1){
-
-        if(node->c1 == 10){
-            fprintf(fo,"\\n ");
-        } else if (node->c1 == 13){
-            fprintf(fo,"\\r ");
-        } else if (node->c1 <= 127){
-            fprintf(fo,"%c ",node->c1);
-        } else {
-            fprintf(fo,"%d ",node->c1);
-        }
-        fprintf(fo,"%s\r\n",node->str);
-        return;
-
+    if(index == str_len){
+        return cur;
     }
-    char tmp[STRSIZE];
-    strcpy(tmp,node->str);
-    strcpy(codes[node->left].str,strcat(tmp,"1"));
-    strcpy(tmp,node->str);
-    strcpy(codes[node->right].str,strcat(tmp,"0"));
-    depth_first_search(&codes[node->left],fo,codes);
-    depth_first_search(&codes[node->right],fo,codes);
 
-    return;
+    if(!node){
+        node = new_node();
+    }
+
+    if(cur->str[index]=='0'){ //go to right
+        node->right = build_trie(node->right,cur,index+1,str_len);
+    } else { //go to left
+        node->left = build_trie(node->left,cur,index+1,str_len);
+    }
+
+    return node;
+}
+
+// Returns an initialized new node
+struct characters * new_node(){
+    struct characters * newnode = (struct characters *)malloc(sizeof(struct characters));
+    newnode->c = 257; // Nodes that are not a leaf nodes are initialized with 257 to avoid confusion
+    newnode->left = NULL;
+    newnode->right = NULL;
+    strcpy(newnode->str,"");
+    return newnode;
+}
+
+// This method converts a character to its ascii code
+char * char_to_bin(char c){
+    char * tmp = (char*)malloc(9 * sizeof(char));
+    for(int i=7;i>=0;i--){
+        tmp[i] = (c&1)+'0';
+        c >>= 1;
+    }
+    tmp[8] = '\0';
+    return tmp;
 }
